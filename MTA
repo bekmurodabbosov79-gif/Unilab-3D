@@ -1,0 +1,198 @@
+<script>
+const questions = [/* sizdagi savollar o‘zgarishsiz qoladi */];
+
+let currentQuestion = 0;
+let answers = JSON.parse(localStorage.getItem("answers")) || new Array(questions.length).fill(null);
+let studentId = localStorage.getItem("studentId") || "";
+let studentName = localStorage.getItem("studentName") || "";
+
+// ✅ TO‘G‘RILANGAN TIMER (har savol 90 sekund)
+let testTimeRemaining = parseInt(localStorage.getItem("time")) || questions.length * 90;
+let timerInterval = null;
+
+function updateTimer() {
+    const minutes = Math.floor(testTimeRemaining / 60);
+    const seconds = testTimeRemaining % 60;
+
+    document.getElementById("timer").textContent =
+        `${minutes}:${seconds.toString().padStart(2, '0')}`;
+
+    if (testTimeRemaining <= 300) {
+        document.getElementById("timer").style.color = "#ef4444";
+    }
+
+    localStorage.setItem("time", testTimeRemaining);
+
+    testTimeRemaining--;
+
+    if (testTimeRemaining < 0) {
+        clearInterval(timerInterval);
+        submitTest();
+    }
+}
+
+// ✅ TESTNI BOSHLASH
+function startTest() {
+    const name = document.getElementById("student-name").value.trim();
+    const qrCode = document.getElementById("qr-code-input").value.trim();
+
+    if (!name || !qrCode) {
+        alert("Iltimos, barcha maydonlarni to'ldiring!");
+        return;
+    }
+
+    studentName = name;
+    studentId = qrCode;
+
+    localStorage.setItem("studentName", name);
+    localStorage.setItem("studentId", qrCode);
+
+    document.getElementById("qr-scanner-screen").classList.add("hidden");
+    document.getElementById("test-screen").classList.remove("hidden");
+
+    timerInterval = setInterval(updateTimer, 1000);
+
+    displayQuestion();
+}
+
+// ✅ SAVOLNI CHIQARISH
+function displayQuestion() {
+    const q = questions[currentQuestion];
+
+    document.getElementById("question-text").textContent =
+        `Savol ${currentQuestion + 1}: ${q.question}`;
+
+    document.getElementById("question-counter").textContent =
+        `${currentQuestion + 1} / ${questions.length}`;
+
+    const container = document.getElementById("options-container");
+    container.innerHTML = "";
+
+    q.options.forEach((option, index) => {
+        const isSelected = answers[currentQuestion] === index;
+
+        const btn = document.createElement("button");
+        btn.className = `w-full p-4 border-2 rounded-lg ${
+            isSelected ? "bg-cyan-600 text-white" : "bg-slate-800 text-white"
+        }`;
+
+        btn.textContent = `${String.fromCharCode(65 + index)}) ${option}`;
+
+        btn.onclick = () => {
+            answers[currentQuestion] = index;
+            localStorage.setItem("answers", JSON.stringify(answers));
+            displayQuestion();
+        };
+
+        container.appendChild(btn);
+    });
+
+    // progress
+    document.getElementById("progress-bar").style.width =
+        ((currentQuestion + 1) / questions.length) * 100 + "%";
+}
+
+// ✅ NEXT
+function nextQuestion() {
+    if (answers[currentQuestion] === null) {
+        alert("Avval javobni tanlang!");
+        return;
+    }
+
+    if (currentQuestion < questions.length - 1) {
+        currentQuestion++;
+        displayQuestion();
+    } else {
+        submitTest();
+    }
+}
+
+// ✅ PREVIOUS
+function previousQuestion() {
+    if (currentQuestion > 0) {
+        currentQuestion--;
+        displayQuestion();
+    }
+}
+
+// ✅ QR SCANNER (REAL CAMERA)
+async function startQRScanner() {
+    const video = document.createElement("video");
+    document.body.appendChild(video);
+
+    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+    video.srcObject = stream;
+    video.setAttribute("playsinline", true);
+    video.play();
+
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d");
+
+    setInterval(() => {
+        if (video.readyState === video.HAVE_ENOUGH_DATA) {
+            canvas.height = video.videoHeight;
+            canvas.width = video.videoWidth;
+
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+            const code = jsQR(imageData.data, canvas.width, canvas.height);
+
+            if (code) {
+                document.getElementById("qr-code-input").value = code.data;
+                stream.getTracks().forEach(track => track.stop());
+                video.remove();
+            }
+        }
+    }, 500);
+}
+
+// ✅ SUBMIT
+async function submitTest() {
+    clearInterval(timerInterval);
+
+    let correctCount = 0;
+
+    answers.forEach((a, i) => {
+        if (a === questions[i].correct) correctCount++;
+    });
+
+    const percentage = Math.round((correctCount / questions.length) * 100);
+
+    // SAFE SAVE
+    try {
+        if (window.dataSdk) {
+            await window.dataSdk.create({
+                student_id: studentId,
+                student_name: studentName,
+                score: percentage
+            });
+        }
+    } catch (e) {
+        console.log("Saqlashda xatolik:", e);
+    }
+
+    // CLEAR STORAGE
+    localStorage.clear();
+
+    document.getElementById("test-screen").classList.add("hidden");
+    document.getElementById("results-screen").classList.remove("hidden");
+
+    document.getElementById("result-name").textContent = `Salom, ${studentName}`;
+    document.getElementById("result-score").textContent = percentage + "%";
+    document.getElementById("result-answers").textContent =
+        `${correctCount} / ${questions.length}`;
+}
+
+// AUTO RESUME
+window.onload = () => {
+    if (studentName && studentId) {
+        document.getElementById("qr-scanner-screen").classList.add("hidden");
+        document.getElementById("test-screen").classList.remove("hidden");
+
+        timerInterval = setInterval(updateTimer, 1000);
+        displayQuestion();
+    }
+};
+</script>
